@@ -15,13 +15,21 @@ Customer churn (customer attrition) is a critical business metric where customer
 In subscription-based industries (telecom, SaaS, streaming services), acquiring a new customer costs 5-25x more than retaining an existing one. Accurate churn prediction allows proactive intervention before customers leave.
 
 ### Approach
-This project implements an end-to-end ML pipeline with:
-- **Strict TDD workflow** (79 comprehensive tests)
-- **Data leakage prevention** (proper train/test separation)
-- **Production-ready code** (type hints, error handling, documentation)
-- **Reproducible results** (fixed random seeds)
-- **Modular architecture** (separation of concerns)
+This project implements an end-to-end ML pipeline emphasizing:
+- **Test-driven development** (79 tests, RED→GREEN cycles)
+- **Leakage-safe preprocessing** (fit on train, transform on test)
+- **Deterministic, reproducible training** (fixed random seeds)
+- **Modular, production-oriented architecture** (typed, documented, tested)
 
+---
+
+## 🧠 What This Project Demonstrates
+
+- **Practical prevention of data leakage** in ML pipelines
+- **Strict Test-Driven Development** applied to ML (not just software)
+- **End-to-end pipeline ownership** (data → model → evaluation)
+- **Production-grade Python practices** (typing, modularity, error handling)
+- **Ability to translate ML concepts** into business-relevant insights
 
 ---
 
@@ -70,6 +78,22 @@ customer-churn-prediction-ml/
 | `evaluate.py` | Computes evaluation metrics and feature importance | `evaluate_model(model, X_test, y_test)`, `get_feature_importance(model)` |
 | `pipeline.py` | Orchestrates full workflow from raw data to evaluation | `run_pipeline(data_path)` |
 
+
+---
+
+## ⚡ Quick Start (TL;DR)
+
+```bash
+# Run all tests
+pytest
+
+# Run full pipeline
+python -c "from src.pipeline import run_pipeline; run_pipeline('data/customer_churn_dataset.csv')"
+```
+
+**Expected outcome:**
+- All 79 tests pass ✅
+- Evaluation metrics printed to console
 
 ---
 
@@ -131,7 +155,7 @@ pytest tests/test_preprocessing.py -v
 pytest --cov=src --cov-report=html
 ```
 
-**Expected output:** 64 tests passing ✅
+**Expected output:** 79 tests passing ✅
 
 ### Running the End-to-End Pipeline
 
@@ -149,16 +173,18 @@ print(f"F1 Score: {metrics['f1']:.4f}")
 print(f"ROC-AUC: {metrics['roc_auc']:.4f}")
 ```
 
-**Pipeline steps:**
+**Pipeline Steps:**
 1. Load raw CSV data
 2. Validate data schema and quality
-3. Split into train/test (80/20, stratified)
-4. Engineer features on both sets
-5. Fit preprocessing on train set
-6. Transform test set using train statistics
-7. Train RandomForest model
-8. Evaluate on test set
-9. Return model and metrics
+3. Split into train/test sets (BEFORE any preprocessing)
+4. Engineer features on both sets independently
+5. Preprocess train set (fit + transform)
+6. Preprocess test set (transform only, using train statistics)
+7. Train model on preprocessed training data
+8. Evaluate model on test set
+9. Return trained model and evaluation metrics
+
+**Pipeline implemented in:** `src/pipeline.py`
 
 ### Making Predictions on New Data
 
@@ -264,18 +290,23 @@ The pipeline evaluates model performance using multiple metrics:
 
 ### Data Leakage Prevention
 
-**Critical:** This project implements **leakage-safe preprocessing** to ensure test data statistics do not influence training:
+This project implements **leakage-safe preprocessing** to ensure test data statistics do not influence training:
 
 ```python
 # ✅ CORRECT: Fit on train, transform on test
 preprocessor, X_train = fit_preprocess(train_df)
 X_test = transform_preprocess(test_df, preprocessor)
-
-# ❌ WRONG: Fitting on test data leaks information
-X_test = preprocess_data(test_df)  # Refits on test data!
 ```
 
 **8 dedicated tests** validate that preprocessing does not refit on test data.
+
+#### Legacy Function (Historical Context)
+
+An earlier helper function (`preprocess_data`) used `fit_transform` internally.  
+This function is retained for backward compatibility only and is **not used in the pipeline**.
+
+All production code uses leakage-safe preprocessing via `fit_preprocess()` and `transform_preprocess()`.  
+This design choice demonstrates awareness of common ML pitfalls and their mitigation.
 
 ---
 
@@ -419,7 +450,7 @@ top_features = sorted(zip(feature_names, importances),
 
 ## 📊 Test Coverage
 
-**Total Tests:** 64  
+**Total Tests:** 79  
 **Test Coverage:** Comprehensive
 
 | Module | Tests | Coverage |
@@ -436,7 +467,7 @@ top_features = sorted(zip(feature_names, importances),
 
 ## 🤝 Contributing
 
-This project was built as a portfolio/academic project demonstrating:
+This project demonstrates:
 - Production-quality ML engineering
 - Strict TDD methodology
 - Data leakage prevention
