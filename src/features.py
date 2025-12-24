@@ -60,14 +60,8 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
         1.0  # Default ratio for zero TotalCharges
     )
     
-    # Feature 4: Total Charges per Month (normalized)
-    df_engineered['charges_per_month'] = np.where(
-        df_engineered['tenure'] > 0,
-        df_engineered['TotalCharges'] / df_engineered['tenure'],
-        0.0
-    )
-    
     return df_engineered
+
 
 
 def _create_tenure_groups(tenure: pd.Series) -> pd.Series:
