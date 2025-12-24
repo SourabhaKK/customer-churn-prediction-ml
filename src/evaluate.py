@@ -99,3 +99,74 @@ def evaluate_model(
         'recall': float(recall),
         'confusion_matrix': cm
     }
+
+
+def get_feature_importance(
+    model: BaseEstimator,
+    feature_names: list = None,
+    top_n: int = 10
+) -> list:
+    """
+    Extract feature importance from a trained tree-based model.
+    
+    Works with models that have feature_importances_ attribute
+    (e.g., RandomForest, GradientBoosting, XGBoost).
+    
+    Args:
+        model: Trained sklearn model with feature_importances_ attribute
+        feature_names: List of feature names (optional, will use indices if not provided)
+        top_n: Number of top features to return (default: 10)
+        
+    Returns:
+        list: List of tuples (feature_name, importance_score) sorted by importance
+              in descending order
+              
+    Raises:
+        AttributeError: If model doesn't have feature_importances_ attribute
+        
+    Example:
+        >>> from sklearn.ensemble import RandomForestClassifier
+        >>> import numpy as np
+        >>> 
+        >>> # Train a model
+        >>> X_train = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])
+        >>> y_train = np.array([0, 0, 1, 1])
+        >>> model = RandomForestClassifier(random_state=42)
+        >>> model.fit(X_train, y_train)
+        >>> 
+        >>> # Get feature importance
+        >>> feature_names = ['tenure', 'monthly_charges', 'total_charges']
+        >>> importances = get_feature_importance(model, feature_names, top_n=3)
+        >>> 
+        >>> for feature, importance in importances:
+        ...     print(f"{feature}: {importance:.4f}")
+    """
+    # Validate model has feature_importances_
+    if not hasattr(model, 'feature_importances_'):
+        raise AttributeError(
+            "Model must have 'feature_importances_' attribute. "
+            "This function works with tree-based models like RandomForest."
+        )
+    
+    # Get feature importances
+    importances = model.feature_importances_
+    
+    # Create feature names if not provided
+    if feature_names is None:
+        feature_names = [f"feature_{i}" for i in range(len(importances))]
+    
+    # Validate feature_names length matches importances
+    if len(feature_names) != len(importances):
+        raise ValueError(
+            f"Length of feature_names ({len(feature_names)}) must match "
+            f"number of features ({len(importances)})"
+        )
+    
+    # Combine feature names with importances
+    feature_importance_pairs = list(zip(feature_names, importances))
+    
+    # Sort by importance (descending)
+    feature_importance_pairs.sort(key=lambda x: x[1], reverse=True)
+    
+    # Return top N features
+    return feature_importance_pairs[:top_n]
