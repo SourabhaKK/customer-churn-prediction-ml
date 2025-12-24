@@ -100,24 +100,29 @@ def run_pipeline(
     y_test = test_df_features['Churn'].map({'No': 0, 'Yes': 1})
     print(f"  Target distribution (train): {y_train.value_counts().to_dict()}")
     
-    # Step 6: Preprocess data
-    # NOTE: Current preprocess_data() does fit_transform
-    # This is a known limitation that will be addressed
-    # For now, we preprocess train and test separately
+    # Step 6: Preprocess data using leakage-safe functions
     print("\nStep 6: Preprocessing features...")
-    print("  WARNING: Current preprocessing fits on each set independently")
-    print("  This should be refactored to fit on train only")
     
-    # Add 'Churn' column temporarily for preprocess_data compatibility
+    # Import leakage-safe preprocessing functions
+    from src.preprocessing import fit_preprocess, transform_preprocess
+    
+    # Add 'Churn' column temporarily for preprocessing compatibility
     X_train_with_target = X_train_raw.copy()
     X_train_with_target['Churn'] = y_train
-    X_train_processed = preprocess_data(X_train_with_target)
     
     X_test_with_target = X_test_raw.copy()
     X_test_with_target['Churn'] = y_test
-    X_test_processed = preprocess_data(X_test_with_target)
+    
+    # Fit preprocessor on training data only
+    preprocessor, X_train_processed = fit_preprocess(X_train_with_target)
+    print("  ✓ Preprocessor fitted on training data")
+    
+    # Transform test data using training statistics (no refitting)
+    X_test_processed = transform_preprocess(X_test_with_target, preprocessor)
+    print("  ✓ Test data transformed using training statistics")
     
     print(f"  Processed shape: {X_train_processed.shape}")
+
     
     # Step 7: Train model
     print("\nStep 7: Training model...")

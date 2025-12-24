@@ -16,11 +16,12 @@ In subscription-based industries (telecom, SaaS, streaming services), acquiring 
 
 ### Approach
 This project implements an end-to-end ML pipeline with:
-- **Strict TDD workflow** (64 comprehensive tests)
+- **Strict TDD workflow** (79 comprehensive tests)
 - **Data leakage prevention** (proper train/test separation)
 - **Production-ready code** (type hints, error handling, documentation)
 - **Reproducible results** (fixed random seeds)
 - **Modular architecture** (separation of concerns)
+
 
 ---
 
@@ -37,6 +38,7 @@ customer-churn-prediction-ml/
 │   ├── features.py                         # Feature engineering (tenure groups, ratios)
 │   ├── train.py                            # Model training (RandomForest)
 │   ├── predict.py                          # Prediction interface
+│   ├── evaluate.py                         # Model evaluation & feature importance
 │   └── pipeline.py                         # End-to-end orchestration
 ├── tests/
 │   ├── __init__.py
@@ -44,9 +46,11 @@ customer-churn-prediction-ml/
 │   ├── test_preprocessing.py               # 18 tests (10 original + 8 leakage-safe)
 │   ├── test_features.py                    # 12 tests
 │   ├── test_training.py                    # 12 tests
-│   └── test_prediction.py                  # 14 tests
+│   ├── test_prediction.py                  # 14 tests
+│   └── test_evaluate.py                    # 15 tests
 ├── outputs/
 │   └── tdd_cycle*_*.png                    # TDD workflow screenshots (RED/GREEN phases)
+├── example_feature_importance.py           # Feature importance example
 ├── requirements.txt                        # Python dependencies
 ├── pytest.ini                              # Pytest configuration
 ├── .gitignore                              # Git ignore rules
@@ -55,6 +59,7 @@ customer-churn-prediction-ml/
 
 ### Module Descriptions
 
+
 | Module | Purpose | Key Functions |
 |--------|---------|---------------|
 | `data_validation.py` | Validates raw data schema and quality | `validate_dataframe(df)` |
@@ -62,7 +67,9 @@ customer-churn-prediction-ml/
 | `features.py` | Creates derived features (tenure groups, charge ratios) | `engineer_features(df)` |
 | `train.py` | Trains RandomForest classifier | `train_model(X, y, random_state)` |
 | `predict.py` | Makes predictions with probability scores | `predict(model, X)` |
+| `evaluate.py` | Computes evaluation metrics and feature importance | `evaluate_model(model, X_test, y_test)`, `get_feature_importance(model)` |
 | `pipeline.py` | Orchestrates full workflow from raw data to evaluation | `run_pipeline(data_path)` |
+
 
 ---
 
