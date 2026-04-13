@@ -5,15 +5,21 @@ This module provides functions to evaluate trained models
 and compute performance metrics.
 """
 
+import logging
+
 import numpy as np
 from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
     roc_auc_score,
     precision_score,
     recall_score,
     confusion_matrix
 )
 from sklearn.base import BaseEstimator
-from typing import Union, Dict, Any
+from typing import Union, Dict, Any, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def evaluate_model(
@@ -68,32 +74,42 @@ def evaluate_model(
     # Validate inputs
     if model is None:
         raise ValueError("Model cannot be None")
-    
+
     if X_test is None:
         raise ValueError("X_test cannot be None")
-    
+
     if y_test is None:
         raise ValueError("y_test cannot be None")
-    
+
     # Validate model has required methods
     if not hasattr(model, 'predict'):
         raise AttributeError("Model must have 'predict' method")
-    
+
     if not hasattr(model, 'predict_proba'):
         raise AttributeError("Model must have 'predict_proba' method")
-    
+
     # Make predictions
     y_pred = model.predict(X_test)
     y_pred_proba = model.predict_proba(X_test)[:, 1]  # Probability of positive class
-    
-    # Compute metrics
+
+    # Compute metrics on the test set
     roc_auc = roc_auc_score(y_test, y_pred_proba)
-    precision = precision_score(y_test, y_pred)
-    recall = recall_score(y_test, y_pred)
+    accuracy = accuracy_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred, zero_division=0)
+    precision = precision_score(y_test, y_pred, zero_division=0)
+    recall = recall_score(y_test, y_pred, zero_division=0)
     cm = confusion_matrix(y_test, y_pred)
-    
+
+    logger.info(
+        "Evaluation complete — accuracy=%.4f roc_auc=%.4f f1=%.4f "
+        "precision=%.4f recall=%.4f",
+        accuracy, roc_auc, f1, precision, recall,
+    )
+
     # Return metrics dictionary
     return {
+        'accuracy': float(accuracy),
+        'f1': float(f1),
         'roc_auc': float(roc_auc),
         'precision': float(precision),
         'recall': float(recall),
@@ -103,7 +119,7 @@ def evaluate_model(
 
 def get_feature_importance(
     model: BaseEstimator,
-    feature_names: list = None,
+    feature_names: Optional[List[str]] = None,
     top_n: int = 10
 ) -> list:
     """

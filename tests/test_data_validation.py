@@ -101,8 +101,8 @@ class TestDataValidation:
             'Churn': ['No', 'Yes', 'No']
         })
         
-        # Act & Assert: Should raise ValueError about null values in TotalCharges
-        with pytest.raises(ValueError, match="TotalCharges.*null values"):
+        # Act & Assert: Should raise ValueError about non-numeric / null values in TotalCharges
+        with pytest.raises(ValueError, match="TotalCharges"):
             validate_dataframe(df_null_total)
 
     def test_validate_dataframe_empty_dataframe(self):

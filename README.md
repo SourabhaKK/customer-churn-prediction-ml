@@ -1,5 +1,7 @@
 # Customer Churn Prediction ML Pipeline
 
+[![CI](https://github.com/SourabhaKK/customer-churn-prediction-ml/actions/workflows/ci.yml/badge.svg)](https://github.com/SourabhaKK/customer-churn-prediction-ml/actions/workflows/ci.yml)
+
 A production-quality machine learning project for predicting customer churn, built using **strict Test-Driven Development (TDD)** methodology with comprehensive test coverage and data leakage prevention.
 
 ## 📋 Project Overview
@@ -48,6 +50,11 @@ customer-churn-prediction-ml/
 │   ├── predict.py                          # Prediction interface
 │   ├── evaluate.py                         # Model evaluation & feature importance
 │   └── pipeline.py                         # End-to-end orchestration
+├── scripts/
+│   └── export_model.py                     # Train & serialise model artifact
+├── models/
+│   ├── README.md                           # Artifact docs & copy instructions
+│   └── churn_model.joblib                  # Serialised model (git-ignored)
 ├── tests/
 │   ├── __init__.py
 │   ├── test_data_validation.py             # 8 tests
@@ -55,14 +62,16 @@ customer-churn-prediction-ml/
 │   ├── test_features.py                    # 12 tests
 │   ├── test_training.py                    # 12 tests
 │   ├── test_prediction.py                  # 14 tests
-│   └── test_evaluate.py                    # 15 tests
+│   ├── test_evaluate.py                    # 15 tests
+│   ├── test_export.py                      # Export artifact validation (skipped in CI)
+│   └── test_integration_regression.py      # Feature count + edge case regression tests
 ├── outputs/
 │   └── tdd_cycle*_*.png                    # TDD workflow screenshots (RED/GREEN phases)
 ├── example_feature_importance.py           # Feature importance example
 ├── requirements.txt                        # Python dependencies
 ├── pytest.ini                              # Pytest configuration
 ├── .gitignore                              # Git ignore rules
-└── README.md                               # This file
+└── README.md                              # This file
 ```
 
 ### Module Descriptions
@@ -92,7 +101,7 @@ python -c "from src.pipeline import run_pipeline; run_pipeline('data/customer_ch
 ```
 
 **Expected outcome:**
-- All 79 tests pass ✅
+- All tests pass ✅ (export tests automatically skipped in CI — no CSV present)
 - Evaluation metrics printed to console
 
 ---
@@ -154,8 +163,6 @@ pytest tests/test_preprocessing.py -v
 ```bash
 pytest --cov=src --cov-report=html
 ```
-
-**Expected output:** 79 tests passing ✅
 
 ### Running the End-to-End Pipeline
 
@@ -247,7 +254,7 @@ Each cycle followed the **RED → GREEN → REFACTOR** pattern:
 - **Prevents regressions** - Changes that break functionality are caught immediately
 - **Living documentation** - Tests describe how code should behave
 - **Design quality** - Writing tests first leads to better API design
-- **Confidence** - 64 passing tests provide confidence in correctness
+- **Confidence** - 79+ passing tests provide confidence in correctness
 
 ---
 
@@ -360,10 +367,10 @@ top_features = sorted(zip(feature_names, importances),
    - **Mitigation:** New `fit_preprocess()` and `transform_preprocess()` functions added
    - **Status:** Pipeline uses leakage-safe functions; legacy function retained for backward compatibility
 
-2. **No Model Persistence**
-   - Trained models are not saved to disk
-   - **Impact:** Model must be retrained for each use
-   - **Next step:** Add `joblib` or `pickle` for model serialization
+2. **Model Persistence (Implemented)**
+   - Trained models are serialised to `models/churn_model.joblib` via `scripts/export_model.py`
+   - The artifact is version-tagged and includes metadata (feature count, metrics, timestamp)
+   - The artifact is loaded by the FastAPI inference service in `ml-model-deployment-fastapi`
 
 3. **No Hyperparameter Tuning**
    - RandomForest uses default hyperparameters
@@ -450,18 +457,20 @@ top_features = sorted(zip(feature_names, importances),
 
 ## 📊 Test Coverage
 
-**Total Tests:** 79  
+**Total Tests:** 79 (core TDD suite) + integration regression tests
 **Test Coverage:** Comprehensive
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
-| Data Validation | 8 | Schema, nulls, required columns |
+| Data Validation | 8 | Schema, nulls, required columns, TotalCharges blank-string coercion |
 | Preprocessing | 18 | Encoding, scaling, leakage prevention |
 | Feature Engineering | 12 | Derived features, edge cases |
 | Model Training | 12 | Fitting, reproducibility, input types |
-| Prediction | 14 | Single/batch, probabilities, errors |
+| Prediction Interface | 14 | Single/batch, probabilities, errors |
+| Model Evaluation | 15 | ROC-AUC, accuracy, F1, confusion matrix |
+| Integration Regression | — | Feature count=51, wrong columns, NaN handling, empty input |
 
-**All tests use synthetic data** for isolation and fast execution.
+**All tests use synthetic data** for isolation and fast execution. No real CSV required in CI.
 
 ---
 

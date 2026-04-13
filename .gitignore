@@ -29,3 +29,8 @@ Thumbs.db
 
 # Project specific
 *.log
+
+# Model artifacts
+models/
+*.joblib
+*.pkl

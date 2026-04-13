@@ -5,11 +5,63 @@ This module provides preprocessing functions to transform raw customer data
 into features suitable for machine learning models.
 """
 
+import logging
+
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
-from typing import Union, Tuple
+from typing import Tuple
+
+logger = logging.getLogger(__name__)
+
+# Columns that must never reach the encoder: identifiers produce cardinality
+# explosions; TotalCharges is a numeric field stored as object in the raw CSV.
+_COLUMNS_TO_DROP = ['customerID']
+_NUMERIC_COERCE_COLUMNS = ['TotalCharges']
+
+
+def _prepare_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a clean feature DataFrame ready for dtype-based column selection.
+
+    Performs two transformations that are invisible to callers but are required
+    for correctness on the real Telco CSV:
+
+    1. Drops ``customerID`` (and any column in ``_COLUMNS_TO_DROP``) so that
+       the OHE step does not produce ~5 685 spurious binary columns.
+    2. Coerces ``TotalCharges`` (and any column in ``_NUMERIC_COERCE_COLUMNS``)
+       from ``object`` dtype to ``float64``, filling blank strings / NaN with
+       0.  This moves the column from the categorical pipeline to the numeric
+       (StandardScaler) pipeline where it belongs.
+
+    Args:
+        df: Feature DataFrame (target column already removed by the caller).
+
+    Returns:
+        Cleaned DataFrame with correct dtypes.
+    """
+    X = df.copy()
+
+    # Drop identifier columns
+    cols_to_drop = [c for c in _COLUMNS_TO_DROP if c in X.columns]
+    if cols_to_drop:
+        logger.info("Dropping identifier column(s): %s", cols_to_drop)
+        X = X.drop(columns=cols_to_drop)
+
+    # Coerce known numeric-but-object columns
+    for col in _NUMERIC_COERCE_COLUMNS:
+        if col in X.columns and X[col].dtype == object:
+            before_nulls = X[col].isnull().sum()
+            X[col] = pd.to_numeric(X[col], errors='coerce').fillna(0)
+            after_nulls = X[col].isnull().sum()
+            imputed = int(X[col].eq(0).sum()) - int(before_nulls)
+            if imputed > 0:
+                logger.warning(
+                    "Column '%s': %d blank/non-numeric value(s) coerced to 0.",
+                    col, imputed,
+                )
+
+    return X
 
 
 def preprocess_data(df: pd.DataFrame) -> np.ndarray:
@@ -49,11 +101,14 @@ def preprocess_data(df: pd.DataFrame) -> np.ndarray:
         X = df.drop('Churn', axis=1)
     else:
         X = df.copy()
-    
+
+    # Drop identifier columns and coerce known numeric-but-object columns
+    X = _prepare_features(X)
+
     # Identify numerical and categorical columns
     numerical_features = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
     categorical_features = X.select_dtypes(include=['object']).columns.tolist()
-    
+
     # Create preprocessing pipeline
     preprocessor = ColumnTransformer(
         transformers=[
@@ -62,10 +117,10 @@ def preprocess_data(df: pd.DataFrame) -> np.ndarray:
         ],
         remainder='passthrough'
     )
-    
+
     # Fit and transform the data
     X_processed = preprocessor.fit_transform(X)
-    
+
     return X_processed
 
 
@@ -103,11 +158,14 @@ def fit_preprocess(df: pd.DataFrame) -> Tuple[ColumnTransformer, np.ndarray]:
         X = df.drop('Churn', axis=1)
     else:
         X = df.copy()
-    
+
+    # Drop identifier columns and coerce known numeric-but-object columns
+    X = _prepare_features(X)
+
     # Identify numerical and categorical columns
     numerical_features = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
     categorical_features = X.select_dtypes(include=['object']).columns.tolist()
-    
+
     # Create preprocessing pipeline
     preprocessor = ColumnTransformer(
         transformers=[
@@ -116,10 +174,10 @@ def fit_preprocess(df: pd.DataFrame) -> Tuple[ColumnTransformer, np.ndarray]:
         ],
         remainder='passthrough'
     )
-    
+
     # Fit and transform the training data
     X_processed = preprocessor.fit_transform(X)
-    
+
     return preprocessor, X_processed
 
 
@@ -155,9 +213,13 @@ def transform_preprocess(df: pd.DataFrame, preprocessor: ColumnTransformer) -> n
         X = df.drop('Churn', axis=1)
     else:
         X = df.copy()
-    
+
+    # Drop identifier columns and coerce known numeric-but-object columns
+    # (must mirror the same preparation done inside fit_preprocess)
+    X = _prepare_features(X)
+
     # Transform using the already-fitted preprocessor
     # This does NOT refit - it only transforms using learned statistics
     X_processed = preprocessor.transform(X)
-    
+
     return X_processed
