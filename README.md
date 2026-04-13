@@ -2,510 +2,207 @@
 
 [![CI](https://github.com/SourabhaKK/customer-churn-prediction-ml/actions/workflows/ci.yml/badge.svg)](https://github.com/SourabhaKK/customer-churn-prediction-ml/actions/workflows/ci.yml)
 
-A production-quality machine learning project for predicting customer churn, built using **strict Test-Driven Development (TDD)** methodology with comprehensive test coverage and data leakage prevention.
-
-## 📋 Project Overview
-
-### Problem Statement
-Customer churn (customer attrition) is a critical business metric where customers stop doing business with a company. Predicting which customers are likely to churn enables businesses to:
-- Implement targeted retention strategies
-- Reduce customer acquisition costs
-- Improve customer lifetime value
-- Optimize marketing spend
-
-### Business Relevance
-In subscription-based industries (telecom, SaaS, streaming services), acquiring a new customer costs 5-25x more than retaining an existing one. Accurate churn prediction allows proactive intervention before customers leave.
-
-### Approach
-This project implements an end-to-end ML pipeline emphasizing:
-- **Test-driven development** (79 tests, RED→GREEN cycles)
-- **Leakage-safe preprocessing** (fit on train, transform on test)
-- **Deterministic, reproducible training** (fixed random seeds)
-- **Modular, production-oriented architecture** (typed, documented, tested)
+End-to-end scikit-learn ML pipeline for customer churn prediction — leakage-safe preprocessing, TDD methodology, and joblib model export for downstream serving.
 
 ---
 
-## 🧠 What This Project Demonstrates
+## Architecture
 
-- **Practical prevention of data leakage** in ML pipelines
-- **Strict Test-Driven Development** applied to ML (not just software)
-- **End-to-end pipeline ownership** (data → model → evaluation)
-- **Production-grade Python practices** (typing, modularity, error handling)
-- **Ability to translate ML concepts** into business-relevant insights
+```mermaid
+graph TD
+    subgraph DATA["DATA LAYER"]
+        CSV["Raw CSV<br/>data/customer_churn_dataset.csv"]
+        DV["Data Validator<br/>src/data_validation.py"]
+        FP["Feature Preparation<br/>_prepare_features: TotalCharges coerce · customerID drop"]
+        CSV --> DV
+        DV -->|"validates schema"| FP
+    end
+
+    subgraph PREP["PREPROCESSING"]
+        SPLIT["Train/Test Split<br/>80/20 stratified · random_state=42"]
+        FIT["Preprocessing Fit<br/>fit_preprocess: StandardScaler + OHE fit on train only"]
+        TRANS["Preprocessing Transform<br/>transform_preprocess on test"]
+        SPLIT -->|"fit on train only"| FIT
+        SPLIT -->|"transform only"| TRANS
+    end
+
+    subgraph ML["ML LAYER"]
+        FE["Feature Engineering<br/>src/features.py: tenure groups · charges ratio"]
+        TRAIN["Model Training<br/>RandomForestClassifier · 100 estimators · random_state=42"]
+        EVAL["Model Evaluation<br/>ROC-AUC · Accuracy · F1 on test set only"]
+        FE -->|"51 features"| TRAIN
+        TRAIN --> EVAL
+    end
+
+    subgraph EXP["EXPORT"]
+        EXPSCRIPT["Export Script<br/>scripts/export_model.py"]
+        ARTIFACT["models/churn_model.joblib"]
+        EXPSCRIPT --> ARTIFACT
+    end
+
+    subgraph DOWN["DOWNSTREAM"]
+        FASTAPI["ml-model-deployment-fastapi"]
+    end
+
+    FP --> SPLIT
+    FIT --> FE
+    TRANS --> FE
+    EVAL -->|"ROC-AUC 0.839"| EXPSCRIPT
+    ARTIFACT -->|"joblib.load()"| FASTAPI
+```
 
 ---
 
-## 🏗️ Project Structure
+## Data Flow
+
+```mermaid
+sequenceDiagram
+    participant CSV
+    participant DataValidator
+    participant FeatureEngineer
+    participant Preprocessor
+    participant Trainer
+    participant Evaluator
+    participant Exporter
+
+    CSV->>DataValidator: 7,043 rows · 21 columns
+    DataValidator->>DataValidator: validate schema · coerce 11 blank TotalCharges to 0.0
+    DataValidator->>FeatureEngineer: stratified 80/20 train/test splits
+    FeatureEngineer->>FeatureEngineer: add tenure_group · avg_monthly_charge · charge_ratio
+    FeatureEngineer->>Preprocessor: train partition (5,634 rows · 22 columns)
+    Preprocessor->>Preprocessor: fit StandardScaler + OHE on train only
+    Preprocessor->>Trainer: X_train (5,634 × 51)
+    FeatureEngineer->>Preprocessor: test partition (1,409 rows · 22 columns)
+    Preprocessor->>Evaluator: X_test (1,409 × 51) — transform only, no refit
+    Trainer->>Trainer: RandomForestClassifier(n_estimators=100, random_state=42).fit()
+    Trainer->>Evaluator: fitted model
+    Evaluator->>Evaluator: ROC-AUC · Accuracy · F1 on test set only
+    Evaluator->>Exporter: roc_auc=0.839 · accuracy=0.7991
+    Exporter->>Exporter: joblib.dump(artifact_dict, compress=3)
+    Exporter-->>Exporter: models/churn_model.joblib written
+```
+
+---
+
+## Key Metrics
+
+| Metric | Value |
+|--------|-------|
+| Dataset | 7,043 rows · 19 raw features |
+| Train / Test split | 5,634 / 1,409 (stratified 80/20) |
+| Post-encoding features | 51 |
+| Model | RandomForestClassifier (100 estimators) |
+| ROC-AUC | 0.839 |
+| Accuracy | 79.91% |
+| Churn-class F1 | +0.58 vs majority baseline |
+| Test suite | 92 tests · 100% pass rate |
+| Inference latency | 16.8 ms (single-row) |
+
+---
+
+## Engineering Highlights
+
+- **Leakage-safe preprocessing**: `StandardScaler` and `OneHotEncoder` are fit exclusively on the training partition via `fit_preprocess`, then applied to test data via `transform_preprocess`. A dedicated leakage test class enforces no refitting on test data.
+- **TotalCharges blank-string handling**: 11 rows in the raw Telco CSV store `TotalCharges` as blank strings. The pipeline coerces them via `pd.to_numeric(errors='coerce').fillna(0)` with a `WARNING` log before validation fires.
+- **customerID dropped before encoding**: `_prepare_features` drops `customerID` prior to `ColumnTransformer` to prevent 7,043 spurious OHE columns from inflating the feature space.
+- **Deterministic evaluation**: `random_state=42` is fixed at every call site — `train_test_split`, `RandomForestClassifier`, and `train_model` — guaranteeing bit-for-bit reproducible metrics across runs.
+- **Export artifact contains model + metadata**: `scripts/export_model.py` serialises a dict with `model`, `feature_count`, `model_version`, `roc_auc`, `accuracy`, and `trained_on` timestamp. The serving layer validates `feature_count` on load to catch silent shape mismatches.
+- **9 TDD cycles across 6 src modules**: every function was written test-first; RED→GREEN→REFACTOR screenshots are preserved in `outputs/`.
+
+---
+
+## Project Structure
 
 ```
 customer-churn-prediction-ml/
-├── data/
-│   └── customer_churn_dataset.csv          # Raw customer data
 ├── src/
-│   ├── __init__.py
-│   ├── data_validation.py                  # Schema & quality validation
-│   ├── preprocessing.py                    # Feature scaling & encoding (leakage-safe)
-│   ├── features.py                         # Feature engineering (tenure groups, ratios)
-│   ├── train.py                            # Model training (RandomForest)
-│   ├── predict.py                          # Prediction interface
-│   ├── evaluate.py                         # Model evaluation & feature importance
-│   └── pipeline.py                         # End-to-end orchestration
+│   ├── data_validation.py          # Schema and data quality checks
+│   ├── preprocessing.py            # Leakage-safe fit/transform pipeline
+│   ├── features.py                 # Derived feature engineering
+│   ├── train.py                    # RandomForestClassifier training
+│   ├── evaluate.py                 # Metrics on held-out test set
+│   ├── pipeline.py                 # End-to-end orchestration
+│   └── predict.py                  # Inference interface
 ├── scripts/
-│   └── export_model.py                     # Train & serialise model artifact
+│   └── export_model.py             # Trains and exports churn_model.joblib
+├── tests/                          # 92 pytest cases across 8 modules
+│   ├── test_data_validation.py
+│   ├── test_preprocessing.py
+│   ├── test_features.py
+│   ├── test_training.py
+│   ├── test_prediction.py
+│   ├── test_evaluate.py
+│   ├── test_export.py
+│   └── test_integration_regression.py
 ├── models/
-│   ├── README.md                           # Artifact docs & copy instructions
-│   └── churn_model.joblib                  # Serialised model (git-ignored)
-├── tests/
-│   ├── __init__.py
-│   ├── test_data_validation.py             # 8 tests
-│   ├── test_preprocessing.py               # 18 tests (10 original + 8 leakage-safe)
-│   ├── test_features.py                    # 12 tests
-│   ├── test_training.py                    # 12 tests
-│   ├── test_prediction.py                  # 14 tests
-│   ├── test_evaluate.py                    # 15 tests
-│   ├── test_export.py                      # Export artifact validation (skipped in CI)
-│   └── test_integration_regression.py      # Feature count + edge case regression tests
-├── outputs/
-│   └── tdd_cycle*_*.png                    # TDD workflow screenshots (RED/GREEN phases)
-├── example_feature_importance.py           # Feature importance example
-├── requirements.txt                        # Python dependencies
-├── pytest.ini                              # Pytest configuration
-├── .gitignore                              # Git ignore rules
-└── README.md                              # This file
+│   └── README.md                   # Artifact docs (joblib excluded from git)
+├── data/
+│   └── customer_churn_dataset.csv
+├── .github/workflows/ci.yml
+├── requirements.txt
+└── README.md
 ```
-
-### Module Descriptions
-
-
-| Module | Purpose | Key Functions |
-|--------|---------|---------------|
-| `data_validation.py` | Validates raw data schema and quality | `validate_dataframe(df)` |
-| `preprocessing.py` | Scales numerical features, encodes categorical features | `fit_preprocess(df)`, `transform_preprocess(df, preprocessor)` |
-| `features.py` | Creates derived features (tenure groups, charge ratios) | `engineer_features(df)` |
-| `train.py` | Trains RandomForest classifier | `train_model(X, y, random_state)` |
-| `predict.py` | Makes predictions with probability scores | `predict(model, X)` |
-| `evaluate.py` | Computes evaluation metrics and feature importance | `evaluate_model(model, X_test, y_test)`, `get_feature_importance(model)` |
-| `pipeline.py` | Orchestrates full workflow from raw data to evaluation | `run_pipeline(data_path)` |
-
 
 ---
 
-## ⚡ Quick Start (TL;DR)
+## Quickstart
 
 ```bash
-# Run all tests
-pytest
-
-# Run full pipeline
-python -c "from src.pipeline import run_pipeline; run_pipeline('data/customer_churn_dataset.csv')"
-```
-
-**Expected outcome:**
-- All tests pass ✅ (export tests automatically skipped in CI — no CSV present)
-- Evaluation metrics printed to console
-
----
-
-## 🚀 Installation
-
-### Prerequisites
-- Python 3.8+
-- pip
-
-### Setup
-
-1. **Clone the repository**
-```bash
-git clone https://github.com/SourabhaKK/customer-churn-prediction-ml.git
+git clone https://github.com/SourabhaKK/customer-churn-prediction-ml
 cd customer-churn-prediction-ml
-```
-
-2. **Create virtual environment** (recommended)
-```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
-
-3. **Install dependencies**
-```bash
+python -m venv venv
+venv\Scripts\activate        # Windows
 pip install -r requirements.txt
 ```
 
-**Dependencies:**
-- `pandas>=2.0.0` - Data manipulation
-- `numpy>=1.24.0` - Numerical operations
-- `scikit-learn>=1.3.0` - ML models and preprocessing
-- `pytest>=7.4.0` - Testing framework
-- `pytest-cov>=4.1.0` - Test coverage
+Run the full pipeline:
 
----
-
-## 🧪 Usage
-
-### Running Tests
-
-**Run all tests:**
 ```bash
-pytest
+python -m src.pipeline
 ```
 
-**Run with verbose output:**
+Export the trained model:
+
 ```bash
-pytest -v
+python scripts/export_model.py
 ```
 
-**Run specific test module:**
+Run tests:
+
 ```bash
-pytest tests/test_preprocessing.py -v
-```
-
-**Run with coverage report:**
-```bash
-pytest --cov=src --cov-report=html
-```
-
-### Running the End-to-End Pipeline
-
-```python
-from src.pipeline import run_pipeline
-
-# Execute full pipeline
-model, metrics = run_pipeline('data/customer_churn_dataset.csv')
-
-# View evaluation metrics
-print(f"Accuracy: {metrics['accuracy']:.4f}")
-print(f"Precision: {metrics['precision']:.4f}")
-print(f"Recall: {metrics['recall']:.4f}")
-print(f"F1 Score: {metrics['f1']:.4f}")
-print(f"ROC-AUC: {metrics['roc_auc']:.4f}")
-```
-
-**Pipeline Steps:**
-1. Load raw CSV data
-2. Validate data schema and quality
-3. Split into train/test sets (BEFORE any preprocessing)
-4. Engineer features on both sets independently
-5. Preprocess train set (fit + transform)
-6. Preprocess test set (transform only, using train statistics)
-7. Train model on preprocessed training data
-8. Evaluate model on test set
-9. Return trained model and evaluation metrics
-
-**Pipeline implemented in:** `src/pipeline.py`
-
-### Making Predictions on New Data
-
-```python
-from src.predict import predict
-import pandas as pd
-
-# Load new customer data
-new_customers = pd.DataFrame({
-    'tenure': [12, 36],
-    'MonthlyCharges': [50.5, 75.2],
-    'TotalCharges': [606.0, 2707.2],
-    'Contract': ['Month-to-month', 'Two year']
-})
-
-# Make predictions
-predictions = predict(model, new_customers)
-print(predictions['predictions'])      # Class labels (0 or 1)
-print(predictions['probabilities'])    # Probability scores
+pytest tests/ -v
 ```
 
 ---
 
-## 🔬 Test-Driven Development (TDD) Methodology
+## CI/CD
 
-This project was built using **strict TDD workflow** across 5 development cycles:
-
-### TDD Cycle Overview
-
-| Cycle | Module | Tests | Focus |
-|-------|--------|-------|-------|
-| **Cycle 1** | Data Validation | 8 | Schema validation, null checks, required columns |
-| **Cycle 2** | Preprocessing | 10 | Feature scaling, one-hot encoding, output validation |
-| **Cycle 3** | Feature Engineering | 12 | Tenure groups, derived features, edge cases |
-| **Cycle 4** | Model Training | 12 | Model fitting, reproducibility, input handling |
-| **Cycle 5** | Prediction Interface | 14 | Single/batch predictions, probabilities, error handling |
-| **Bonus** | Leakage-Safe Preprocessing | 8 | Fit/transform separation, no refitting on test data |
-
-### TDD Workflow
-
-Each cycle followed the **RED → GREEN → REFACTOR** pattern:
-
-1. **RED Phase** 🔴
-   - Write failing tests first
-   - Tests define expected behavior
-   - Screenshot of failing tests saved to `outputs/`
-
-2. **GREEN Phase** 🟢
-   - Implement minimal code to pass tests
-   - All tests must pass
-   - Screenshot of passing tests saved to `outputs/`
-
-3. **REFACTOR Phase** 🔵
-   - Clean up code
-   - Improve readability
-   - Tests remain passing
-
-### Why TDD?
-
-- **Prevents regressions** - Changes that break functionality are caught immediately
-- **Living documentation** - Tests describe how code should behave
-- **Design quality** - Writing tests first leads to better API design
-- **Confidence** - 79+ passing tests provide confidence in correctness
+The CI pipeline triggers on every push and pull request to `main`. It runs four steps in order on `ubuntu-latest` with Python 3.11: repository checkout (`actions/checkout@v4`), Python environment setup (`actions/setup-python@v5`), dependency installation (`pip install -r requirements.txt`), and the full test suite (`pytest tests/ -v --tb=short`). The badge above reflects the current status of the `ci.yml` workflow on the `main` branch.
 
 ---
 
-## 🤖 Model & Evaluation
+## Ecosystem Position
 
-### Model Choice: RandomForest Classifier
+This pipeline is the training layer of a connected ML system:
 
-**Why RandomForest?**
-- ✅ **Interpretable** - Feature importance readily available
-- ✅ **Robust** - Handles non-linear relationships and feature interactions
-- ✅ **No feature scaling required** - Works with mixed feature types
-- ✅ **Baseline performance** - Strong out-of-the-box results
-- ✅ **Ensemble method** - Reduces overfitting through averaging
-
-**Hyperparameters:**
-```python
-RandomForestClassifier(
-    n_estimators=100,      # 100 decision trees
-    max_depth=10,          # Limit tree depth to prevent overfitting
-    min_samples_split=5,   # Minimum samples to split a node
-    min_samples_leaf=2,    # Minimum samples in leaf node
-    random_state=42,       # Reproducibility
-    n_jobs=-1              # Use all CPU cores
-)
-```
-
-### Evaluation Metrics
-
-The pipeline evaluates model performance using multiple metrics:
-
-- **Accuracy** - Overall correctness
-- **Precision** - Of predicted churners, how many actually churned?
-- **Recall** - Of actual churners, how many did we catch?
-- **F1 Score** - Harmonic mean of precision and recall
-- **ROC-AUC** - Area under ROC curve (threshold-independent)
-- **Confusion Matrix** - Breakdown of predictions vs. actuals
-- **Classification Report** - Per-class precision, recall, F1
-
-**Metrics are calculated on held-out test set (20% of data)** to provide unbiased performance estimates.
-
-### Data Leakage Prevention
-
-This project implements **leakage-safe preprocessing** to ensure test data statistics do not influence training:
-
-```python
-# ✅ CORRECT: Fit on train, transform on test
-preprocessor, X_train = fit_preprocess(train_df)
-X_test = transform_preprocess(test_df, preprocessor)
-```
-
-**8 dedicated tests** validate that preprocessing does not refit on test data.
-
-#### Legacy Function (Historical Context)
-
-An earlier helper function (`preprocess_data`) used `fit_transform` internally.  
-This function is retained for backward compatibility only and is **not used in the pipeline**.
-
-All production code uses leakage-safe preprocessing via `fit_preprocess()` and `transform_preprocess()`.  
-This design choice demonstrates awareness of common ML pitfalls and their mitigation.
+| Layer | Repo | Role |
+|-------|------|------|
+| ML Training | customer-churn-prediction-ml | ← YOU ARE HERE |
+| LLM Backend | llm-ai-basket-builder | GPT-4o-mini + Pydantic + FastAPI |
+| Model Serving | ml-model-deployment-fastapi | Serves churn model · Docker · AWS EC2 |
+| Drift Detection | ml-model-monitoring-drift-detection | PSI / KS / Chi-Square · CLI |
+| NLP Pipeline | nlp-complaint-classification-pipeline | TF-IDF + BERT · 253 tests |
 
 ---
 
-## 🔍 Explainability & Interpretability
+## Engineering Notes
 
-### Feature Engineering for Interpretability
+- **Why fit/transform separation instead of `fit_transform` on the full dataset**: calling `fit_transform` on the full dataset before splitting allows test-set statistics (mean, variance, category frequencies) to leak into the scaler and encoder, producing optimistically biased evaluation metrics. `fit_preprocess` + `transform_preprocess` prevents this by ensuring the transformer sees only training data during fitting.
 
-The project creates **domain-meaningful features** that are easy to explain:
+- **Why `TotalCharges` required explicit coercion**: the Telco CSV stores `TotalCharges` as `dtype=object` because 11 rows contain blank strings for customers with zero tenure. Without `pd.to_numeric(errors='coerce').fillna(0)`, the column lands in the categorical pipeline (OHE) instead of the numeric pipeline (StandardScaler), producing incorrect feature types and silent value corruption.
 
-1. **Tenure Groups** - Categorical buckets (new, short, medium, long, very_long)
-   - Business insight: "Long-tenure customers are less likely to churn"
+- **Why `customerID` must be dropped before OHE**: `customerID` is a unique string identifier. If it reaches `OneHotEncoder`, it produces one binary column per customer (7,043 columns), inflating memory use, training time, and model complexity without adding predictive signal. `_prepare_features` removes it before any `ColumnTransformer` step.
 
-2. **Average Monthly Charge** - `TotalCharges / tenure`
-   - Business insight: "Customers paying more per month may have higher expectations"
+- **Why `random_state=42` at every split point**: a single fixed seed is not sufficient if `train_test_split`, `RandomForestClassifier`, and `train_model` each use independent sources of randomness. Fixing all three guarantees that re-running the pipeline on the same dataset always produces the same split, the same tree structure, and the same evaluation metrics — making results auditable and reproducible.
 
-3. **Charge Ratio** - `MonthlyCharges / TotalCharges`
-   - Business insight: "Recent price increases may trigger churn"
-
-### RandomForest Feature Importance
-
-RandomForest provides built-in feature importance scores:
-
-```python
-# Extract feature importance
-importances = model.feature_importances_
-feature_names = [...] # Feature names from preprocessing
-
-# Sort and display top features
-top_features = sorted(zip(feature_names, importances), 
-                     key=lambda x: x[1], reverse=True)[:10]
-```
-
-**Interpretation:** Features with higher importance have more influence on churn predictions.
-
-### Limitations of Current Explainability
-
-- ❌ **No SHAP/LIME** - Individual prediction explanations not implemented
-- ❌ **No feature importance visualization** - Results not plotted
-- ❌ **No partial dependence plots** - Feature effect curves not generated
-
-**Next steps:** Add SHAP values for instance-level explanations.
-
----
-
-## ⚠️ Limitations & Known Issues
-
-### Current Limitations
-
-1. **Preprocessing Leakage in Legacy Function**
-   - `preprocess_data()` uses `fit_transform` internally
-   - **Mitigation:** New `fit_preprocess()` and `transform_preprocess()` functions added
-   - **Status:** Pipeline uses leakage-safe functions; legacy function retained for backward compatibility
-
-2. **Model Persistence (Implemented)**
-   - Trained models are serialised to `models/churn_model.joblib` via `scripts/export_model.py`
-   - The artifact is version-tagged and includes metadata (feature count, metrics, timestamp)
-   - The artifact is loaded by the FastAPI inference service in `ml-model-deployment-fastapi`
-
-3. **No Hyperparameter Tuning**
-   - RandomForest uses default hyperparameters
-   - **Impact:** Potential performance left on table
-   - **Next step:** Implement GridSearchCV or RandomizedSearchCV
-
-4. **Limited Explainability**
-   - Feature importance available but not extracted/visualized
-   - No SHAP or LIME for instance-level explanations
-   - **Next step:** Add explainability module with visualizations
-
-5. **No Production Deployment**
-   - No API endpoint or serving infrastructure
-   - **Next step:** Add Flask/FastAPI REST API for predictions
-
-6. **Single Model**
-   - Only RandomForest implemented
-   - **Next step:** Compare with XGBoost, LightGBM, Logistic Regression
-
-### Data Assumptions
-
-- Dataset is assumed to be clean (no major outliers or data quality issues)
-- Target variable ('Churn') is balanced or stratified sampling is sufficient
-- Features are assumed to be relevant and not redundant
-
----
-
-## 🎯 Next Steps & Future Improvements
-
-### High Priority
-
-1. **Add Model Persistence**
-   ```python
-   import joblib
-   joblib.dump(model, 'models/churn_model.pkl')
-   ```
-
-2. **Extract & Visualize Feature Importance**
-   ```python
-   import matplotlib.pyplot as plt
-   # Plot top 10 features
-   ```
-
-3. **Add SHAP Explanations**
-   ```python
-   import shap
-   explainer = shap.TreeExplainer(model)
-   shap_values = explainer.shap_values(X_test)
-   ```
-
-4. **Hyperparameter Tuning**
-   ```python
-   from sklearn.model_selection import GridSearchCV
-   # Tune n_estimators, max_depth, min_samples_split
-   ```
-
-### Medium Priority
-
-5. **Add CI/CD Pipeline**
-   - GitHub Actions to run tests on every push
-   - Automated test coverage reporting
-
-6. **Model Comparison**
-   - Implement XGBoost, LightGBM, Logistic Regression
-   - Compare performance metrics
-
-7. **Cross-Validation**
-   - Add k-fold cross-validation for robust performance estimates
-
-8. **Data Profiling**
-   - Use `pandas-profiling` to generate EDA report
-
-### Low Priority
-
-9. **REST API**
-   - Flask or FastAPI endpoint for predictions
-   - Docker containerization
-
-10. **Monitoring & Logging**
-    - Add structured logging
-    - Track prediction latency and model drift
-
----
-
-## 📊 Test Coverage
-
-**Total Tests:** 79 (core TDD suite) + integration regression tests
-**Test Coverage:** Comprehensive
-
-| Module | Tests | Coverage |
-|--------|-------|----------|
-| Data Validation | 8 | Schema, nulls, required columns, TotalCharges blank-string coercion |
-| Preprocessing | 18 | Encoding, scaling, leakage prevention |
-| Feature Engineering | 12 | Derived features, edge cases |
-| Model Training | 12 | Fitting, reproducibility, input types |
-| Prediction Interface | 14 | Single/batch, probabilities, errors |
-| Model Evaluation | 15 | ROC-AUC, accuracy, F1, confusion matrix |
-| Integration Regression | — | Feature count=51, wrong columns, NaN handling, empty input |
-
-**All tests use synthetic data** for isolation and fast execution. No real CSV required in CI.
-
----
-
-## 🤝 Contributing
-
-This project demonstrates:
-- Production-quality ML engineering
-- Strict TDD methodology
-- Data leakage prevention
-- Clean code architecture
-
-For questions or suggestions, please open an issue.
-
----
-
-## 📄 License
-
-MIT License - See LICENSE file for details.
-
----
-
-## 👤 Author
-
-**Sourabha KK**
-- GitHub: [@SourabhaKK](https://github.com/SourabhaKK)
-- Project: [customer-churn-prediction-ml](https://github.com/SourabhaKK/customer-churn-prediction-ml)
-
----
-
-## 🙏 Acknowledgments
-
-- **TDD Methodology** - Inspired by Kent Beck's "Test-Driven Development by Example"
-- **Scikit-learn** - Excellent ML library with clear documentation
-- **Pytest** - Powerful and intuitive testing framework
-
----
-
-**Built with ❤️ using Test-Driven Development**
+- **Why the export artifact stores `feature_count` alongside the model**: the FastAPI serving layer calls `joblib.load()` and immediately checks `artifact["feature_count"] == 51` against the shape of incoming request data. Without this guard, a feature engineering change that adds or removes a column would cause a silent shape mismatch at inference time rather than a loud failure at export time. Storing the count in the artifact makes the contract between training and serving explicit and machine-checkable.
